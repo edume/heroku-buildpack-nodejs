@@ -331,8 +331,8 @@ pnpm_prune_devdependencies() {
     echo "Skipping because NODE_ENV is not 'production'"
     meta_set "skipped-prune" "true"
     return 0
-  elif [ -n "$NPM_CONFIG_PRODUCTION" ]; then
-    echo "Skipping because NPM_CONFIG_PRODUCTION is '$NPM_CONFIG_PRODUCTION'"
+  elif [[ "$PNPM_SKIP_PRUNING" == "true" ]]; then
+    echo "Skipping because PNPM_SKIP_PRUNING is '$PNPM_SKIP_PRUNING'"
     meta_set "skipped-prune" "true"
     return 0
   else
