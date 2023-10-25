@@ -54,8 +54,6 @@ source "$BP_DIR/lib/metadata.sh"
 source "$BP_DIR/lib/features.sh"
 # shellcheck source=lib/builddata.sh
 source "$BP_DIR/lib/builddata.sh"
-# shellcheck source=lib/pnpm.sh
-source "$BP_DIR/lib/pnpm.sh"
 # shellcheck source=lib/yarn-2.sh
 source "$BP_DIR/lib/yarn-2.sh"
 
