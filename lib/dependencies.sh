@@ -318,10 +318,7 @@ npm_prune_devdependencies() {
 }
 
 pnpm_prune_devdependencies() {
-  local pnpm_version
   local build_dir=${1:-}
-
-  pnpm_version=$(pnpm --version)
 
   if [ "$NODE_ENV" == "test" ]; then
     echo "Skipping because NODE_ENV is 'test'"
