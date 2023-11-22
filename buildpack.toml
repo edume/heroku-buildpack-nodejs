@@ -31,3 +31,6 @@ version = "1.0.0"
       "yarn2-plugins/prune-dev-dependencies/jest.config.js",
       "yarn2-plugins/prune-dev-dependencies/src",
   ]
+
+[[stacks]]
+id = "heroku-20"
