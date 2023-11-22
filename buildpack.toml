@@ -1,6 +1,7 @@
 [buildpack]
 id = "pnpm.node.buildpack"
 name = "Node.js"
+version = "1.0.0"
 
   [publish.Ignore]
   files = [
