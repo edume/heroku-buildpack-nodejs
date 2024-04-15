@@ -179,7 +179,7 @@ testYarnRun() {
 }
 
 testNoVersion() {
-  local default_version="18"
+  local default_version="20"
   compile "no-version"
   assertCaptured "engines.node (package.json):  unspecified"
   assertCaptured "Resolving node version ${default_version}.x"
@@ -780,8 +780,7 @@ testYarn4() {
   assertCaptured "Running 'yarn install' with yarn.lock"
   assertCaptured "Build script check"
   assertCaptured "Running 'yarn heroku prune'"
-  assertCaptured "@types-node-npm-16.11.26-6163d95b7d-8c7a9a6d08.zip appears to be unused - removing"
-  assertCaptured "uuid-npm-9.0.0-46c41e3e43-e1f76aff37.zip appears to be unused - removing"
+  assertCaptured "- @types/node@npm:16.11.26, uuid@npm:9.0.0"
   assertCapturedSuccess
 }
 ###
@@ -838,6 +837,13 @@ testNpmVersionSpecific() {
   assertCaptured "Bootstrapping npm 2.1.11"
   assertNotCaptured "WARNING"
   assertCapturedSuccess
+}
+
+testNpmVersionIncompatible() {
+  compile "npm-version-incompat"
+  assertCaptured "Unable to install npm 10.x"
+  assertCaptured "Is npm 10.x compatible with this Node.js version?"
+  assertCapturedError
 }
 
 testFailingBuild() {
@@ -1139,7 +1145,7 @@ testNodeEnvNpmConfigProductionFalse() {
   assertCaptured "preinstall: production"
   assertCaptured "postinstall: production"
   assertCaptured "heroku-postbuild: production"
-  assertCapturedSuccess
+  assertEquals "Expected successful exit code" "0" "${RETURN}"
 }
 
 # Avoid this issue
@@ -1193,19 +1199,25 @@ testPluginInstallationBuildTime() {
   compile "node-13"
   assertFileExists "${compile_dir}/.heroku/heroku-nodejs-plugin/heroku-nodejs-plugin.node"
 
-  compile "node-14"
+  compile "node-14.9"
   assertFileExists "${compile_dir}/.heroku/heroku-nodejs-plugin/heroku-nodejs-plugin.node"
+
+  compile "node-14"
+  assertFileExists "${compile_dir}/.heroku/metrics/metrics_collector.cjs"
+
+  compile "node-21"
+  assertFileExists "${compile_dir}/.heroku/metrics/metrics_collector.cjs"
 
   # but not for earlier versions
   compile "node-6"
   assertFileDoesNotExist "${compile_dir}/.heroku/heroku-nodejs-plugin/heroku-nodejs-plugin.node"
 }
 
-testPluginInstallationRunTime() {
+testPluginInstallationRunTimeNodeAddon() {
   local env_dir=$(mktmpdir)
-  compile "node-14" "$(mktmpdir)" $env_dir
+  compile "node-14.9" "$(mktmpdir)" $env_dir
 
-  # by default $NODE_OPTIONS is unmodifed
+  # by default $NODE_OPTIONS is unmodified
   executeStartup $env_dir
   assertEquals "" "$NODE_OPTIONS"
   cleanupStartup
@@ -1229,6 +1241,129 @@ testPluginInstallationRunTime() {
   export NODE_OPTIONS="--max-old-space-size=128"
   executeStartup $env_dir
   assertEquals "--max-old-space-size=128 --require $compile_dir/.heroku/heroku-nodejs-plugin" "$NODE_OPTIONS"
+  cleanupStartup
+
+  # and it will leave it unchanged if $HEROKU_SKIP_NODE_PLUGIN is defined
+  export HEROKU_METRICS_URL=https://localhost:5000
+  export NODE_OPTIONS="--max-old-space-size=128"
+  export HEROKU_SKIP_NODE_PLUGIN=true
+  executeStartup $env_dir
+  assertEquals "--max-old-space-size=128" "$NODE_OPTIONS"
+  cleanupStartup
+}
+
+testPluginInstallationRunTimeNodeScript() {
+  local env_dir=$(mktmpdir)
+  compile "node-14" "$(mktmpdir)" $env_dir
+  assertNotCaptured "The native addon for Node.js language metrics is no longer supported. Unset the HEROKU_LEGACY_NODE_PLUGIN environment variable to migrate to the new metrics collector."
+
+  # by default $NODE_OPTIONS is unmodified
+  executeStartup $env_dir
+  assertEquals "" "$NODE_OPTIONS"
+  cleanupStartup
+
+  # If $HEROKU_METRICS_URL is defined at run time, the script
+  # should add a require statement to $NODE_OPTIONS
+  export HEROKU_METRICS_URL=https://localhost:5000
+  executeStartup $env_dir
+  assertEquals "--require $compile_dir/.heroku/metrics/metrics_collector.cjs" "$NODE_OPTIONS"
+  cleanupStartup
+
+  # unless $HEROKU_SKIP_NODE_PLUGIN is defined
+  export HEROKU_METRICS_URL=https://localhost:5000
+  export HEROKU_SKIP_NODE_PLUGIN=true
+  executeStartup $env_dir
+  assertEquals "" "$NODE_OPTIONS"
+  cleanupStartup
+
+  # if $NODE_OPTIONS already exists, it will append the require command
+  export HEROKU_METRICS_URL=https://localhost:5000
+  export NODE_OPTIONS="--max-old-space-size=128"
+  executeStartup $env_dir
+  assertEquals "--max-old-space-size=128 --require $compile_dir/.heroku/metrics/metrics_collector.cjs" "$NODE_OPTIONS"
+  cleanupStartup
+
+  # and it will leave it unchanged if $HEROKU_SKIP_NODE_PLUGIN is defined
+  export HEROKU_METRICS_URL=https://localhost:5000
+  export NODE_OPTIONS="--max-old-space-size=128"
+  export HEROKU_SKIP_NODE_PLUGIN=true
+  executeStartup $env_dir
+  assertEquals "--max-old-space-size=128" "$NODE_OPTIONS"
+  cleanupStartup
+}
+
+testPluginInstallationRunTimeNodeScriptWhenLegacyPluginIsRequested() {
+  local env_dir=$(mktmpdir)
+  echo "true" > $env_dir/HEROKU_LEGACY_NODE_PLUGIN
+  compile "node-14" "$(mktmpdir)" $env_dir
+  assertCaptured "The native addon for Node.js language metrics is no longer supported. Unset the HEROKU_LEGACY_NODE_PLUGIN environment variable to migrate to the new metrics collector."
+
+  # by default $NODE_OPTIONS is unmodified
+  executeStartup $env_dir
+  assertEquals "" "$NODE_OPTIONS"
+  cleanupStartup
+
+  # Since $HEROKU_LEGACY_NODE_PLUGIN was defined at build time, the script
+  # should add a require statement to $NODE_OPTIONS for the legacy plugin
+  export HEROKU_METRICS_URL=https://localhost:5000
+  executeStartup $env_dir
+  assertEquals "--require $compile_dir/.heroku/heroku-nodejs-plugin" "$NODE_OPTIONS"
+  cleanupStartup
+
+  # unless $HEROKU_SKIP_NODE_PLUGIN is defined
+  export HEROKU_METRICS_URL=https://localhost:5000
+  export HEROKU_SKIP_NODE_PLUGIN=true
+  executeStartup $env_dir
+  assertEquals "" "$NODE_OPTIONS"
+  cleanupStartup
+
+  # Since $HEROKU_LEGACY_NODE_PLUGIN was defined at build time,
+  # if $NODE_OPTIONS already exists, it will append the legacy plugin to the require command
+  export HEROKU_METRICS_URL=https://localhost:5000
+  export NODE_OPTIONS="--max-old-space-size=128"
+  executeStartup $env_dir
+  assertEquals "--max-old-space-size=128 --require $compile_dir/.heroku/heroku-nodejs-plugin" "$NODE_OPTIONS"
+  cleanupStartup
+
+  # and it will leave it unchanged if $HEROKU_SKIP_NODE_PLUGIN is defined
+  export HEROKU_METRICS_URL=https://localhost:5000
+  export NODE_OPTIONS="--max-old-space-size=128"
+  export HEROKU_SKIP_NODE_PLUGIN=true
+  executeStartup $env_dir
+  assertEquals "--max-old-space-size=128" "$NODE_OPTIONS"
+  cleanupStartup
+}
+
+testPluginInstallationRunTimeNodeScriptWithNoLegacyFallback() {
+  local env_dir=$(mktmpdir)
+  echo "true" > $env_dir/HEROKU_LEGACY_NODE_PLUGIN
+  compile "node-21" "$(mktmpdir)" $env_dir
+  assertNotCaptured "The native addon for Node.js language metrics is no longer supported. Unset the HEROKU_LEGACY_NODE_PLUGIN environment variable to migrate to the new metrics collector."
+
+  # by default $NODE_OPTIONS is unmodified
+  executeStartup $env_dir
+  assertEquals "" "$NODE_OPTIONS"
+  cleanupStartup
+
+  # If $HEROKU_METRICS_URL is defined at run time, the script
+  # should add a require statement to $NODE_OPTIONS
+  export HEROKU_METRICS_URL=https://localhost:5000
+  executeStartup $env_dir
+  assertEquals "--require $compile_dir/.heroku/metrics/metrics_collector.cjs" "$NODE_OPTIONS"
+  cleanupStartup
+
+  # unless $HEROKU_SKIP_NODE_PLUGIN is defined
+  export HEROKU_METRICS_URL=https://localhost:5000
+  export HEROKU_SKIP_NODE_PLUGIN=true
+  executeStartup $env_dir
+  assertEquals "" "$NODE_OPTIONS"
+  cleanupStartup
+
+  # if $NODE_OPTIONS already exists, it will append the require command
+  export HEROKU_METRICS_URL=https://localhost:5000
+  export NODE_OPTIONS="--max-old-space-size=128"
+  executeStartup $env_dir
+  assertEquals "--max-old-space-size=128 --require $compile_dir/.heroku/metrics/metrics_collector.cjs" "$NODE_OPTIONS"
   cleanupStartup
 
   # and it will leave it unchanged if $HEROKU_SKIP_NODE_PLUGIN is defined
@@ -1519,6 +1654,13 @@ testNpmCiCachingWhenUseNpmInstallIsFalse() {
   assertCaptured "Caching build"
   assertCaptured "- npm cache"
   assertNotCaptured "npm http fetch GET"
+  assertCapturedSuccess
+}
+
+testUseNpm10() {
+  compile "use-npm-v10"
+  assertNotCaptured "Detected package-lock.json: defaulting npm to version 5.x.x"
+  assertCaptured "Using default npm version: 10"
   assertCapturedSuccess
 }
 
